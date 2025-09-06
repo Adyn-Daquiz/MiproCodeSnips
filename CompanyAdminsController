@@ -1,0 +1,109 @@
+using AutoMapper;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using MyProfessionals.Data;
+using MyProfessionalss.Data.Model;
+using MyProfessionalss.Data.Model.DTO;
+
+namespace MyProfessionals.Web.API.Controllers
+{
+    [ApiController]
+    [Route("api/[controller]")]
+    public class CompanyAdminsController : ControllerBase
+    {
+        private readonly AppDbContext _context;
+        private readonly IMapper _mapper;
+
+        public CompanyAdminsController(AppDbContext context, IMapper mapper)
+        {
+            _context = context;
+            _mapper = mapper;
+        }
+
+        [HttpGet("company/{companyId}")]
+        public async Task<ActionResult<IEnumerable<CompanyAdminDto>>> GetByCompanyAsync(
+            int companyId, CancellationToken cancellationToken)
+        {
+            var admins = await _context.CompanyAdmins
+                .Include(ca => ca.User)
+                .Include(ca => ca.Company)
+                .Where(ca => ca.CompanyId == companyId)
+                .ToListAsync(cancellationToken);
+
+            return Ok(_mapper.Map<List<CompanyAdminDto>>(admins));
+        }
+
+        [HttpGet("{id:int}")]
+        public async Task<ActionResult<CompanyAdminDto>> GetByIdAsync(
+            int id, CancellationToken cancellationToken)
+        {
+            var admin = await _context.CompanyAdmins
+                .Include(ca => ca.User)
+                .Include(ca => ca.Company)
+                .FirstOrDefaultAsync(ca => ca.Id == id, cancellationToken);
+
+            return admin == null
+                ? NotFound()
+                : Ok(_mapper.Map<CompanyAdminDto>(admin));
+        }
+
+        [HttpGet("company/{companyId}/employees")]
+        public async Task<ActionResult<IEnumerable<UserDto>>> GetEmployeesAsync(
+            int companyId, CancellationToken cancellationToken)
+        {
+            var employees = await _context.CompanyAdmins
+                .Include(ca => ca.User)
+                .Where(ca => ca.CompanyId == companyId)
+                .Select(ca => ca.User)
+                .ToListAsync(cancellationToken);
+
+            return Ok(_mapper.Map<List<UserDto>>(employees));
+        }
+
+        [HttpPost]
+        public async Task<ActionResult<CompanyAdminDto>> CreateAsync(
+            [FromBody] CompanyAdminDto dto, CancellationToken cancellationToken)
+        {
+            if (!ModelState.IsValid) return BadRequest(ModelState);
+
+            var exists = await _context.CompanyAdmins
+                .AnyAsync(ca => ca.CompanyId == dto.CompanyId && ca.UserId == dto.UserId, cancellationToken);
+
+            if (exists) return Conflict("User is already an admin of this company.");
+
+            var entity = _mapper.Map<CompanyAdmin>(dto);
+            _context.CompanyAdmins.Add(entity);
+            await _context.SaveChangesAsync(cancellationToken);
+
+            dto.Id = entity.Id;
+            return CreatedAtAction(nameof(GetByIdAsync), new { id = entity.Id }, dto);
+        }
+
+        [HttpDelete("{id:int}")]
+        public async Task<IActionResult> DeleteAsync(int id, CancellationToken cancellationToken)
+        {
+            var entity = await _context.CompanyAdmins.FindAsync(new object[] { id }, cancellationToken);
+            if (entity == null) return NotFound();
+
+            _context.CompanyAdmins.Remove(entity);
+            await _context.SaveChangesAsync(cancellationToken);
+
+            return NoContent();
+        }
+
+        [HttpDelete("company/{companyId}/employees/{userId}")]
+        public async Task<IActionResult> RemoveEmployeeAsync(
+            int companyId, int userId, CancellationToken cancellationToken)
+        {
+            var entity = await _context.CompanyAdmins
+                .FirstOrDefaultAsync(e => e.CompanyId == companyId && e.UserId == userId, cancellationToken);
+
+            if (entity == null) return NotFound();
+
+            _context.CompanyAdmins.Remove(entity);
+            await _context.SaveChangesAsync(cancellationToken);
+
+            return NoContent();
+        }
+    }
+}
